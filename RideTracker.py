@@ -1,4 +1,4 @@
-from flask import Flask, render_template_string, request, jsonify, redirect, url_for
+from flask import Flask, render_template_string, request, jsonify, redirect, url_for, send_from_directory, render_template
 import socket
 import subprocess
 import os
@@ -50,7 +50,6 @@ def init_db():
     conn.commit()
     conn.close()
 
-
 # HTML template for the web interface
 HTML_TEMPLATE = '''
 <!DOCTYPE html>
@@ -58,7 +57,14 @@ HTML_TEMPLATE = '''
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Local Flask Server</title>
+    <link rel="manifest" href="/manifest.json">
+<script>
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.register("/service-worker.js");
+  }
+</script>
+
+    <title>Ride Tracker</title>
     <style>
         * {
             margin: 0;
@@ -537,6 +543,16 @@ def generate_clients_table():
 
     html += '</tbody></table>'
     return html
+
+
+@app.route('/manifest.json')
+def manifest():
+    return send_from_directory('static', 'manifest.json')
+
+
+@app.route('/service-worker.js')
+def sw():
+    return send_from_directory('static', 'service-worker.js')
 
 
 @app.route('/')
