@@ -1,10 +1,54 @@
-from flask import Flask, render_template_string, request, jsonify
+from flask import Flask, render_template_string, request, jsonify, redirect, url_for
 import socket
 import subprocess
 import os
 from datetime import datetime
+import sqlite3
 
 app = Flask(__name__)
+
+# Database setup
+DATABASE = 'app_database.db'
+
+
+def get_db():
+    """Get database connection"""
+    conn = sqlite3.connect(DATABASE)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def init_db():
+    """Initialize the database with tables"""
+    conn = get_db()
+    cursor = conn.cursor()
+
+    # Users table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            first_name TEXT NOT NULL,
+            last_name TEXT NOT NULL,
+            date_created TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_login TIMESTAMP
+        )
+    ''')
+
+    # Clients table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS clients (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            first_name TEXT NOT NULL,
+            last_name TEXT NOT NULL,
+            date_started TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            status TEXT DEFAULT 'active',
+            last_ride TIMESTAMP
+        )
+    ''')
+
+    conn.commit()
+    conn.close()
+
 
 # HTML template for the web interface
 HTML_TEMPLATE = '''
@@ -27,7 +71,7 @@ HTML_TEMPLATE = '''
             padding: 20px;
         }
         .container {
-            max-width: 800px;
+            max-width: 1200px;
             margin: 0 auto;
             background: white;
             border-radius: 15px;
@@ -39,6 +83,11 @@ HTML_TEMPLATE = '''
             margin-bottom: 10px;
             font-size: 2em;
         }
+        h2 {
+            color: #374151;
+            margin: 30px 0 15px 0;
+            font-size: 1.5em;
+        }
         .status {
             display: inline-block;
             padding: 8px 16px;
@@ -48,50 +97,61 @@ HTML_TEMPLATE = '''
             font-size: 0.9em;
             margin-bottom: 20px;
         }
-        .status.warning {
-            background: #f59e0b;
-        }
-        .status.error {
-            background: #ef4444;
-        }
-        .info-box {
-            background: #f3f4f6;
-            padding: 20px;
-            border-radius: 10px;
+        .nav-tabs {
+            display: flex;
+            gap: 10px;
             margin: 20px 0;
+            border-bottom: 2px solid #e5e7eb;
         }
-        .info-box h3 {
-            color: #374151;
-            margin-bottom: 10px;
-        }
-        .info-box p {
+        .nav-tab {
+            padding: 12px 24px;
+            background: none;
+            border: none;
             color: #6b7280;
-            line-height: 1.6;
-            margin: 5px 0;
+            cursor: pointer;
+            font-size: 1em;
+            border-bottom: 3px solid transparent;
+            transition: all 0.3s;
         }
-        .feature-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 15px;
-            margin: 20px 0;
+        .nav-tab:hover {
+            color: #667eea;
         }
-        .feature-card {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 20px;
-            border-radius: 10px;
-            text-align: center;
+        .nav-tab.active {
+            color: #667eea;
+            border-bottom-color: #667eea;
         }
-        .feature-card h4 {
-            margin-bottom: 10px;
+        .tab-content {
+            display: none;
+            animation: fadeIn 0.3s;
         }
-        input[type="text"] {
+        .tab-content.active {
+            display: block;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            color: #374151;
+            font-weight: 500;
+            margin-bottom: 8px;
+        }
+        input[type="text"],
+        input[type="datetime-local"],
+        select {
             width: 100%;
             padding: 12px;
             border: 2px solid #e5e7eb;
             border-radius: 8px;
             font-size: 1em;
-            margin: 10px 0;
+        }
+        input:focus, select:focus {
+            outline: none;
+            border-color: #667eea;
         }
         button {
             background: #667eea;
@@ -101,55 +161,74 @@ HTML_TEMPLATE = '''
             border-radius: 8px;
             font-size: 1em;
             cursor: pointer;
-            width: 100%;
             margin-top: 10px;
         }
         button:hover {
             background: #5568d3;
         }
-        button:disabled {
-            background: #9ca3af;
-            cursor: not-allowed;
+        .form-section {
+            background: #f9fafb;
+            padding: 25px;
+            border-radius: 10px;
+            margin-bottom: 30px;
         }
-        #response, #updateResponse {
+        table {
+            width: 100%;
+            border-collapse: collapse;
             margin-top: 20px;
+            background: white;
+        }
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #e5e7eb;
+        }
+        th {
+            background: #f9fafb;
+            color: #374151;
+            font-weight: 600;
+        }
+        tr:hover {
+            background: #f9fafb;
+        }
+        .badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.85em;
+            font-weight: 500;
+        }
+        .badge-active {
+            background: #d1fae5;
+            color: #065f46;
+        }
+        .badge-inactive {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+        .btn-delete {
+            background: #ef4444;
+            padding: 6px 12px;
+            font-size: 0.9em;
+        }
+        .btn-delete:hover {
+            background: #dc2626;
+        }
+        .alert {
             padding: 15px;
-            background: #f0fdf4;
-            border-left: 4px solid #10b981;
-            border-radius: 5px;
+            border-radius: 8px;
+            margin: 15px 0;
             display: none;
         }
-        #updateResponse.warning {
-            background: #fffbeb;
-            border-left-color: #f59e0b;
+        .alert-success {
+            background: #d1fae5;
+            color: #065f46;
+            border-left: 4px solid #10b981;
         }
-        #updateResponse.error {
-            background: #fef2f2;
-            border-left-color: #ef4444;
-        }
-        .update-section {
-            background: #eff6ff;
-            padding: 20px;
-            border-radius: 10px;
-            margin: 20px 0;
-            border: 2px solid #3b82f6;
-        }
-        .update-section h3 {
-            color: #1e40af;
-            margin-bottom: 15px;
-        }
-        .loading {
-            display: inline-block;
-            width: 20px;
-            height: 20px;
-            border: 3px solid #f3f4f6;
-            border-top: 3px solid #667eea;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-        }
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
+        .alert-error {
+            background: #fee2e2;
+            color: #991b1b;
+            border-left: 4px solid #ef4444;
         }
     </style>
 </head>
@@ -158,152 +237,212 @@ HTML_TEMPLATE = '''
         <h1>🚀 Local Flask Server</h1>
         <span class="status">● Running on Android</span>
 
-        <div class="info-box">
-            <h3>📱 Server Information</h3>
-            <p><strong>Device:</strong> Samsung Galaxy Tab S6 Lite</p>
-            <p><strong>Local IP:</strong> {{ ip_address }}</p>
-            <p><strong>Port:</strong> 5000</p>
-            <p><strong>Access URL:</strong> http://{{ ip_address }}:5000</p>
-            <p><strong>WiFi:</strong> <span id="wifiStatus">{{ wifi_status }}</span></p>
+        <div class="nav-tabs">
+            <button class="nav-tab active" onclick="switchTab('dashboard')">📊 Dashboard</button>
+            <button class="nav-tab" onclick="switchTab('users')">👥 Users</button>
+            <button class="nav-tab" onclick="switchTab('clients')">🚗 Clients</button>
         </div>
 
-        <div class="update-section">
-            <h3>🔄 Version Control & Updates</h3>
-            <p><strong>Current Version:</strong> {{ current_version }}</p>
-            <p><strong>Last Checked:</strong> {{ last_check }}</p>
-            <button onclick="checkForUpdates()" id="updateBtn">
-                Check for Updates
-            </button>
-            <div id="updateResponse"></div>
-        </div>
+        <!-- Dashboard Tab -->
+        <div id="dashboard" class="tab-content active">
+            <h2>System Information</h2>
+            <div class="form-section">
+                <p><strong>Device:</strong> Samsung Galaxy Tab S6 Lite</p>
+                <p><strong>Local IP:</strong> {{ ip_address }}</p>
+                <p><strong>Port:</strong> 5000</p>
+                <p><strong>WiFi:</strong> {{ wifi_status }}</p>
+                <p><strong>Version:</strong> {{ current_version }}</p>
+            </div>
 
-        <div class="feature-grid">
-            <div class="feature-card">
-                <h4>📡 Locally Hosted</h4>
-                <p>Runs entirely on your tablet</p>
-            </div>
-            <div class="feature-card">
-                <h4>🔒 Secure</h4>
-                <p>No internet required</p>
-            </div>
-            <div class="feature-card">
-                <h4>⚡ Fast</h4>
-                <p>Local network speed</p>
-            </div>
-            <div class="feature-card">
-                <h4>🔄 Auto-Update</h4>
-                <p>Check for latest version</p>
+            <h2>Statistics</h2>
+            <div class="form-section">
+                <p><strong>Total Users:</strong> <span id="userCount">{{ user_count }}</span></p>
+                <p><strong>Total Clients:</strong> <span id="clientCount">{{ client_count }}</span></p>
+                <p><strong>Active Clients:</strong> <span id="activeCount">{{ active_count }}</span></p>
             </div>
         </div>
 
-        <div class="info-box">
-            <h3>✨ Test the Server</h3>
-            <input type="text" id="testInput" placeholder="Enter a message...">
-            <button onclick="sendTest()">Send Test Message</button>
-            <div id="response"></div>
+        <!-- Users Tab -->
+        <div id="users" class="tab-content">
+            <h2>Add New User</h2>
+            <div class="form-section">
+                <div id="userAlert" class="alert"></div>
+                <form id="userForm">
+                    <div class="form-group">
+                        <label>First Name:</label>
+                        <input type="text" name="first_name" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Last Name:</label>
+                        <input type="text" name="last_name" required>
+                    </div>
+                    <button type="submit">Add User</button>
+                </form>
+            </div>
+
+            <h2>All Users</h2>
+            <div id="usersTable">
+                {{ users_table | safe }}
+            </div>
+        </div>
+
+        <!-- Clients Tab -->
+        <div id="clients" class="tab-content">
+            <h2>Add New Client</h2>
+            <div class="form-section">
+                <div id="clientAlert" class="alert"></div>
+                <form id="clientForm">
+                    <div class="form-group">
+                        <label>First Name:</label>
+                        <input type="text" name="first_name" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Last Name:</label>
+                        <input type="text" name="last_name" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Status:</label>
+                        <select name="status">
+                            <option value="active">Active</option>
+                            <option value="inactive">Inactive</option>
+                        </select>
+                    </div>
+                    <button type="submit">Add Client</button>
+                </form>
+            </div>
+
+            <h2>All Clients</h2>
+            <div id="clientsTable">
+                {{ clients_table | safe }}
+            </div>
         </div>
     </div>
 
     <script>
-        function sendTest() {
-            const input = document.getElementById('testInput');
-            const response = document.getElementById('response');
+        function switchTab(tabName) {
+            // Hide all tabs
+            document.querySelectorAll('.tab-content').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            document.querySelectorAll('.nav-tab').forEach(btn => {
+                btn.classList.remove('active');
+            });
 
-            fetch('/api/echo', {
+            // Show selected tab
+            document.getElementById(tabName).classList.add('active');
+            event.target.classList.add('active');
+
+            // Refresh data when switching tabs
+            if (tabName === 'users') loadUsers();
+            if (tabName === 'clients') loadClients();
+            if (tabName === 'dashboard') loadStats();
+        }
+
+        // User Form
+        document.getElementById('userForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const formData = new FormData(this);
+            const data = Object.fromEntries(formData);
+
+            fetch('/api/users', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ message: input.value })
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(data)
             })
             .then(res => res.json())
             .then(data => {
-                response.style.display = 'block';
-                response.innerHTML = `<strong>Server Response:</strong> ${data.echo}`;
+                showAlert('userAlert', data.message, 'success');
+                this.reset();
+                loadUsers();
             })
-            .catch(err => {
-                response.style.display = 'block';
-                response.innerHTML = `<strong>Error:</strong> ${err}`;
-            });
-        }
-
-        function checkForUpdates() {
-            const btn = document.getElementById('updateBtn');
-            const response = document.getElementById('updateResponse');
-
-            btn.disabled = true;
-            btn.innerHTML = '<span class="loading"></span> Checking...';
-            response.style.display = 'none';
-
-            fetch('/api/check-updates')
-            .then(res => res.json())
-            .then(data => {
-                response.style.display = 'block';
-                response.className = '';
-
-                if (data.error) {
-                    response.classList.add('error');
-                    response.innerHTML = `<strong>❌ Error:</strong> ${data.error}`;
-                } else if (data.updates_available) {
-                    response.classList.add('warning');
-                    response.innerHTML = `
-                        <strong>🎉 Update Available!</strong><br>
-                        Current: ${data.current_version}<br>
-                        Latest: ${data.remote_version}<br>
-                        <button onclick="applyUpdate()" style="margin-top: 10px;">Apply Update</button>
-                    `;
-                } else {
-                    response.innerHTML = `
-                        <strong>✅ Up to date!</strong><br>
-                        Version: ${data.current_version}<br>
-                        ${data.message}
-                    `;
-                }
-
-                btn.disabled = false;
-                btn.innerHTML = 'Check for Updates';
-            })
-            .catch(err => {
-                response.style.display = 'block';
-                response.classList.add('error');
-                response.innerHTML = `<strong>Error:</strong> ${err.message}`;
-                btn.disabled = false;
-                btn.innerHTML = 'Check for Updates';
-            });
-        }
-
-        function applyUpdate() {
-            const response = document.getElementById('updateResponse');
-            response.innerHTML = '<span class="loading"></span> Updating...';
-
-            fetch('/api/apply-update', {
-                method: 'POST'
-            })
-            .then(res => res.json())
-            .then(data => {
-                if (data.success) {
-                    response.innerHTML = `
-                        <strong>✅ ${data.message}</strong><br>
-                        Please restart the server to apply changes.
-                    `;
-                } else {
-                    response.classList.add('error');
-                    response.innerHTML = `<strong>❌ Error:</strong> ${data.error}`;
-                }
-            })
-            .catch(err => {
-                response.classList.add('error');
-                response.innerHTML = `<strong>Error:</strong> ${err.message}`;
-            });
-        }
-
-        // Auto-check on page load if WiFi is connected
-        window.addEventListener('load', function() {
-            const wifiStatus = document.getElementById('wifiStatus').textContent;
-            if (wifiStatus === 'Connected') {
-                setTimeout(checkForUpdates, 2000);
-            }
+            .catch(err => showAlert('userAlert', 'Error adding user', 'error'));
         });
+
+        // Client Form
+        document.getElementById('clientForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const formData = new FormData(this);
+            const data = Object.fromEntries(formData);
+
+            fetch('/api/clients', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(data)
+            })
+            .then(res => res.json())
+            .then(data => {
+                showAlert('clientAlert', data.message, 'success');
+                this.reset();
+                loadClients();
+            })
+            .catch(err => showAlert('clientAlert', 'Error adding client', 'error'));
+        });
+
+        function showAlert(id, message, type) {
+            const alert = document.getElementById(id);
+            alert.className = 'alert alert-' + type;
+            alert.textContent = message;
+            alert.style.display = 'block';
+            setTimeout(() => alert.style.display = 'none', 3000);
+        }
+
+        function loadUsers() {
+            fetch('/api/users')
+            .then(res => res.text())
+            .then(html => {
+                document.getElementById('usersTable').innerHTML = html;
+            });
+        }
+
+        function loadClients() {
+            fetch('/api/clients')
+            .then(res => res.text())
+            .then(html => {
+                document.getElementById('clientsTable').innerHTML = html;
+            });
+        }
+
+        function loadStats() {
+            fetch('/api/stats')
+            .then(res => res.json())
+            .then(data => {
+                document.getElementById('userCount').textContent = data.user_count;
+                document.getElementById('clientCount').textContent = data.client_count;
+                document.getElementById('activeCount').textContent = data.active_count;
+            });
+        }
+
+        function deleteUser(id) {
+            if (confirm('Are you sure you want to delete this user?')) {
+                fetch(`/api/users/${id}`, {method: 'DELETE'})
+                .then(() => loadUsers());
+            }
+        }
+
+        function deleteClient(id) {
+            if (confirm('Are you sure you want to delete this client?')) {
+                fetch(`/api/clients/${id}`, {method: 'DELETE'})
+                .then(() => loadClients());
+            }
+        }
+
+        function updateLastRide(id) {
+            fetch(`/api/clients/${id}/ride`, {method: 'POST'})
+            .then(res => res.json())
+            .then(data => {
+                alert(data.message);
+                loadClients();
+            });
+        }
+
+        function updateLogin(id) {
+            fetch(`/api/users/${id}/login`, {method: 'POST'})
+            .then(res => res.json())
+            .then(data => {
+                alert(data.message);
+                loadUsers();
+            });
+        }
     </script>
 </body>
 </html>
@@ -325,11 +464,10 @@ def get_local_ip():
 def check_wifi_connection():
     """Check if device is connected to WiFi"""
     try:
-        # Try to resolve a DNS name to check internet connectivity
         socket.create_connection(("8.8.8.8", 53), timeout=3)
-        return True
+        return "Connected"
     except OSError:
-        return False
+        return "Disconnected"
 
 
 def get_git_version():
@@ -343,169 +481,195 @@ def get_git_version():
         )
         if result.returncode == 0:
             return result.stdout.strip()
-        return "No git repository"
+        return "No git"
     except Exception:
-        return "Git not available"
+        return "N/A"
 
 
-def check_for_git_updates():
-    """Check if there are updates available in the git repository"""
-    try:
-        # Fetch latest changes from remote
-        subprocess.run(
-            ['git', 'fetch', 'origin'],
-            capture_output=True,
-            text=True,
-            cwd=os.path.dirname(os.path.abspath(__file__)),
-            timeout=10
-        )
+def generate_users_table():
+    """Generate HTML table for users"""
+    conn = get_db()
+    users = conn.execute('SELECT * FROM users ORDER BY date_created DESC').fetchall()
+    conn.close()
 
-        # Get local commit hash
-        local = subprocess.run(
-            ['git', 'rev-parse', 'HEAD'],
-            capture_output=True,
-            text=True,
-            cwd=os.path.dirname(os.path.abspath(__file__))
-        )
+    if not users:
+        return '<p style="color: #6b7280; padding: 20px;">No users found. Add your first user above!</p>'
 
-        # Get remote commit hash
-        remote = subprocess.run(
-            ['git', 'rev-parse', 'origin/main'],
-            capture_output=True,
-            text=True,
-            cwd=os.path.dirname(os.path.abspath(__file__))
-        )
+    html = '<table><thead><tr>'
+    html += '<th>ID</th><th>First Name</th><th>Last Name</th><th>Date Created</th><th>Last Login</th><th>Actions</th>'
+    html += '</tr></thead><tbody>'
 
-        if local.returncode == 0 and remote.returncode == 0:
-            local_hash = local.stdout.strip()
-            remote_hash = remote.stdout.strip()
+    for user in users:
+        html += f'<tr><td>{user["id"]}</td>'
+        html += f'<td>{user["first_name"]}</td>'
+        html += f'<td>{user["last_name"]}</td>'
+        html += f'<td>{user["date_created"]}</td>'
+        html += f'<td>{user["last_login"] or "Never"}</td>'
+        html += f'<td><button onclick="updateLogin({user["id"]})">Update Login</button> '
+        html += f'<button class="btn-delete" onclick="deleteUser({user["id"]})">Delete</button></td></tr>'
 
-            return {
-                'updates_available': local_hash != remote_hash,
-                'current': local_hash[:7],
-                'remote': remote_hash[:7]
-            }
-
-        return None
-    except subprocess.TimeoutExpired:
-        return None
-    except Exception as e:
-        return None
+    html += '</tbody></table>'
+    return html
 
 
-def apply_git_update():
-    """Apply git updates by pulling from remote"""
-    try:
-        result = subprocess.run(
-            ['git', 'pull', 'origin', 'main'],
-            capture_output=True,
-            text=True,
-            cwd=os.path.dirname(os.path.abspath(__file__)),
-            timeout=30
-        )
+def generate_clients_table():
+    """Generate HTML table for clients"""
+    conn = get_db()
+    clients = conn.execute('SELECT * FROM clients ORDER BY date_started DESC').fetchall()
+    conn.close()
 
-        if result.returncode == 0:
-            return {'success': True, 'message': result.stdout}
-        else:
-            return {'success': False, 'error': result.stderr}
-    except Exception as e:
-        return {'success': False, 'error': str(e)}
+    if not clients:
+        return '<p style="color: #6b7280; padding: 20px;">No clients found. Add your first client above!</p>'
+
+    html = '<table><thead><tr>'
+    html += '<th>ID</th><th>First Name</th><th>Last Name</th><th>Date Started</th><th>Status</th><th>Last Ride</th><th>Actions</th>'
+    html += '</tr></thead><tbody>'
+
+    for client in clients:
+        status_class = 'badge-active' if client['status'] == 'active' else 'badge-inactive'
+        html += f'<tr><td>{client["id"]}</td>'
+        html += f'<td>{client["first_name"]}</td>'
+        html += f'<td>{client["last_name"]}</td>'
+        html += f'<td>{client["date_started"]}</td>'
+        html += f'<td><span class="badge {status_class}">{client["status"].title()}</span></td>'
+        html += f'<td>{client["last_ride"] or "Never"}</td>'
+        html += f'<td><button onclick="updateLastRide({client["id"]})">Record Ride</button> '
+        html += f'<button class="btn-delete" onclick="deleteClient({client["id"]})">Delete</button></td></tr>'
+
+    html += '</tbody></table>'
+    return html
 
 
 @app.route('/')
 def home():
     """Main page"""
-    ip_address = get_local_ip()
-    wifi_status = "Connected" if check_wifi_connection() else "Disconnected"
-    current_version = get_git_version()
-    last_check = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn = get_db()
+    user_count = conn.execute('SELECT COUNT(*) FROM users').fetchone()[0]
+    client_count = conn.execute('SELECT COUNT(*) FROM clients').fetchone()[0]
+    active_count = conn.execute('SELECT COUNT(*) FROM clients WHERE status="active"').fetchone()[0]
+    conn.close()
 
     return render_template_string(
         HTML_TEMPLATE,
-        ip_address=ip_address,
-        wifi_status=wifi_status,
-        current_version=current_version,
-        last_check=last_check
+        ip_address=get_local_ip(),
+        wifi_status=check_wifi_connection(),
+        current_version=get_git_version(),
+        user_count=user_count,
+        client_count=client_count,
+        active_count=active_count,
+        users_table=generate_users_table(),
+        clients_table=generate_clients_table()
     )
 
 
-@app.route('/api/check-updates')
-def check_updates():
-    """API endpoint to check for updates"""
-    if not check_wifi_connection():
-        return jsonify({
-            'error': 'No internet connection. Please connect to WiFi.',
-            'updates_available': False
-        })
-
-    update_info = check_for_git_updates()
-
-    if update_info is None:
-        return jsonify({
-            'error': 'Unable to check for updates. Make sure this is a git repository.',
-            'updates_available': False
-        })
-
-    return jsonify({
-        'updates_available': update_info['updates_available'],
-        'current_version': update_info['current'],
-        'remote_version': update_info['remote'],
-        'message': 'Updates available!' if update_info['updates_available'] else 'You are on the latest version.',
-        'checked_at': datetime.now().isoformat()
-    })
+# API Routes for Users
+@app.route('/api/users', methods=['GET'])
+def get_users():
+    """Get all users as HTML table"""
+    return generate_users_table()
 
 
-@app.route('/api/apply-update', methods=['POST'])
-def apply_update():
-    """API endpoint to apply updates"""
-    if not check_wifi_connection():
-        return jsonify({
-            'success': False,
-            'error': 'No internet connection. Please connect to WiFi.'
-        })
-
-    result = apply_git_update()
-
-    if result['success']:
-        return jsonify({
-            'success': True,
-            'message': 'Update applied successfully! Please restart the server.',
-            'details': result['message']
-        })
-    else:
-        return jsonify({
-            'success': False,
-            'error': result['error']
-        })
-
-
-@app.route('/api/echo', methods=['POST'])
-def echo():
-    """API endpoint to echo back messages"""
+@app.route('/api/users', methods=['POST'])
+def add_user():
+    """Add a new user"""
     data = request.get_json()
-    message = data.get('message', '')
-    return jsonify({
-        'echo': f"You said: {message}",
-        'length': len(message),
-        'timestamp': datetime.now().isoformat()
-    })
+    conn = get_db()
+    conn.execute(
+        'INSERT INTO users (first_name, last_name) VALUES (?, ?)',
+        (data['first_name'], data['last_name'])
+    )
+    conn.commit()
+    conn.close()
+    return jsonify({'message': 'User added successfully!'})
 
 
-@app.route('/api/info', methods=['GET'])
-def info():
-    """API endpoint to get server information"""
+@app.route('/api/users/<int:id>', methods=['DELETE'])
+def delete_user(id):
+    """Delete a user"""
+    conn = get_db()
+    conn.execute('DELETE FROM users WHERE id = ?', (id,))
+    conn.commit()
+    conn.close()
+    return jsonify({'message': 'User deleted'})
+
+
+@app.route('/api/users/<int:id>/login', methods=['POST'])
+def update_login(id):
+    """Update last login time"""
+    conn = get_db()
+    conn.execute(
+        'UPDATE users SET last_login = ? WHERE id = ?',
+        (datetime.now().strftime('%Y-%m-%d %H:%M:%S'), id)
+    )
+    conn.commit()
+    conn.close()
+    return jsonify({'message': 'Login time updated!'})
+
+
+# API Routes for Clients
+@app.route('/api/clients', methods=['GET'])
+def get_clients():
+    """Get all clients as HTML table"""
+    return generate_clients_table()
+
+
+@app.route('/api/clients', methods=['POST'])
+def add_client():
+    """Add a new client"""
+    data = request.get_json()
+    conn = get_db()
+    conn.execute(
+        'INSERT INTO clients (first_name, last_name, status) VALUES (?, ?, ?)',
+        (data['first_name'], data['last_name'], data.get('status', 'active'))
+    )
+    conn.commit()
+    conn.close()
+    return jsonify({'message': 'Client added successfully!'})
+
+
+@app.route('/api/clients/<int:id>', methods=['DELETE'])
+def delete_client(id):
+    """Delete a client"""
+    conn = get_db()
+    conn.execute('DELETE FROM clients WHERE id = ?', (id,))
+    conn.commit()
+    conn.close()
+    return jsonify({'message': 'Client deleted'})
+
+
+@app.route('/api/clients/<int:id>/ride', methods=['POST'])
+def update_ride(id):
+    """Update last ride time"""
+    conn = get_db()
+    conn.execute(
+        'UPDATE clients SET last_ride = ? WHERE id = ?',
+        (datetime.now().strftime('%Y-%m-%d %H:%M:%S'), id)
+    )
+    conn.commit()
+    conn.close()
+    return jsonify({'message': 'Last ride time updated!'})
+
+
+@app.route('/api/stats')
+def get_stats():
+    """Get statistics"""
+    conn = get_db()
+    user_count = conn.execute('SELECT COUNT(*) FROM users').fetchone()[0]
+    client_count = conn.execute('SELECT COUNT(*) FROM clients').fetchone()[0]
+    active_count = conn.execute('SELECT COUNT(*) FROM clients WHERE status="active"').fetchone()[0]
+    conn.close()
+
     return jsonify({
-        'server': 'Flask on Android',
-        'device': 'Samsung Galaxy Tab S6 Lite',
-        'ip': get_local_ip(),
-        'port': 5000,
-        'status': 'running',
-        'wifi': check_wifi_connection(),
-        'version': get_git_version()
+        'user_count': user_count,
+        'client_count': client_count,
+        'active_count': active_count
     })
 
 
 if __name__ == '__main__':
+    # Initialize database
+    init_db()
+
     local_ip = get_local_ip()
     wifi_connected = check_wifi_connection()
     current_version = get_git_version()
@@ -517,22 +681,11 @@ if __name__ == '__main__':
     print(f"🌐 Local IP: {local_ip}")
     print(f"🔗 Access URL: http://{local_ip}:5000")
     print(f"🔗 Localhost: http://127.0.0.1:5000")
-    print(f"📡 WiFi: {'Connected ✅' if wifi_connected else 'Disconnected ❌'}")
+    print(f"📡 WiFi: {wifi_connected}")
     print(f"📦 Version: {current_version}")
+    print(f"💾 Database: {DATABASE}")
     print("=" * 50)
     print("✅ Server is running! Press CTRL+C to stop.")
     print("=" * 50 + "\n")
 
-    # Auto-check for updates on startup if WiFi is connected
-    if wifi_connected:
-        print("🔄 Checking for updates...")
-        update_info = check_for_git_updates()
-        if update_info and update_info['updates_available']:
-            print(f"⚠️  Update available! Current: {update_info['current']} → Latest: {update_info['remote']}")
-            print("   Visit the web interface to apply the update.")
-        elif update_info:
-            print("✅ You are running the latest version!")
-        print()
-
-    # Run on all interfaces (0.0.0.0) so it's accessible from other devices on the same network
     app.run(host='0.0.0.0', port=5000, debug=True)
