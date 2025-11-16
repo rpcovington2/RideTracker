@@ -13,6 +13,7 @@ DATABASE = 'app_database.db'
 
 def get_db():
     """Get database connection"""
+    print(DATABASE)
     conn = sqlite3.connect(DATABASE)
     conn.row_factory = sqlite3.Row
     return conn
@@ -234,12 +235,11 @@ HTML_TEMPLATE = '''
 </head>
 <body>
     <div class="container">
-        <h1>🚀 Local Flask Server</h1>
-        <span class="status">● Running on Android</span>
-
+        <h1>🚀 Ride Tracker</h1>
+        
         <div class="nav-tabs">
             <button class="nav-tab active" onclick="switchTab('dashboard')">📊 Dashboard</button>
-            <button class="nav-tab" onclick="switchTab('users')">👥 Users</button>
+            <button class="nav-tab" onclick="switchTab('users')" style="display:none;">👥 Users</button>
             <button class="nav-tab" onclick="switchTab('clients')">🚗 Clients</button>
         </div>
 
@@ -288,6 +288,10 @@ HTML_TEMPLATE = '''
 
         <!-- Clients Tab -->
         <div id="clients" class="tab-content">
+        <h2>All Clients</h2>
+            <div id="clientsTable">
+                {{ clients_table | safe }}
+            </div>
             <h2>Add New Client</h2>
             <div class="form-section">
                 <div id="clientAlert" class="alert"></div>
@@ -309,11 +313,6 @@ HTML_TEMPLATE = '''
                     </div>
                     <button type="submit">Add Client</button>
                 </form>
-            </div>
-
-            <h2>All Clients</h2>
-            <div id="clientsTable">
-                {{ clients_table | safe }}
             </div>
         </div>
     </div>
